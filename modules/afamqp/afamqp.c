@@ -156,22 +156,22 @@ afamqp_dd_set_exchange_type(LogDriver *d, const gchar *exchange_type)
   self->exchange_type = g_strdup(exchange_type);
 }
 
-void
-afamqp_dd_set_routing_key(LogDriver *d, const gchar *routing_key)
+gboolean
+afamqp_dd_set_routing_key(LogDriver *d, const gchar *routing_key, GError **error)
 {
   AMQPDestDriver *self = (AMQPDestDriver *) d;
 
-  log_template_compile(self->routing_key_template, routing_key, NULL);
+  return log_template_compile(self->routing_key_template, routing_key, error);
 }
 
-void
-afamqp_dd_set_body(LogDriver *d, const gchar *body)
+gboolean
+afamqp_dd_set_body(LogDriver *d, const gchar *body, GError **error)
 {
   AMQPDestDriver *self = (AMQPDestDriver *) d;
 
   if (!self->body_template)
     self->body_template = log_template_new(configuration, NULL);
-  log_template_compile(self->body_template, body, NULL);
+  return log_template_compile(self->body_template, body, error);
 }
 
 void
@@ -698,7 +698,7 @@ afamqp_dd_new(void)
   afamqp_dd_set_port((LogDriver *) self, 5672);
   afamqp_dd_set_exchange((LogDriver *) self, "syslog");
   afamqp_dd_set_exchange_type((LogDriver *) self, "fanout");
-  afamqp_dd_set_routing_key((LogDriver *) self, "");
+  afamqp_dd_set_routing_key((LogDriver *) self, "", NULL);
   afamqp_dd_set_persistent((LogDriver *) self, TRUE);
   afamqp_dd_set_exchange_declare((LogDriver *) self, FALSE);
 

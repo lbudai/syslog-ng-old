@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2012 Nagy, Attila <bra@fsn.hu>
- * Copyright (c) 2012 BalaBit IT Ltd, Budapest, Hungary
- * Copyright (c) 2012 Gergely Nagy <algernon@balabit.hu>
+ * Copyright (c) 2012-2013 BalaBit IT Ltd, Budapest, Hungary
+ * Copyright (c) 2012-2013 Gergely Nagy <algernon@balabit.hu>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published
@@ -36,8 +36,8 @@ void afamqp_dd_set_exchange(LogDriver *d, const gchar *database);
 void afamqp_dd_set_exchange_declare(LogDriver *d, gboolean declare);
 void afamqp_dd_set_exchange_type(LogDriver *d, const gchar *exchange_type);
 void afamqp_dd_set_vhost(LogDriver *d, const gchar *vhost);
-void afamqp_dd_set_routing_key(LogDriver *d, const gchar *routing_key);
-void afamqp_dd_set_body(LogDriver *d, const gchar *body);
+gboolean afamqp_dd_set_routing_key(LogDriver *d, const gchar *routing_key, GError **error);
+gboolean afamqp_dd_set_body(LogDriver *d, const gchar *body, GError **error);
 void afamqp_dd_set_persistent(LogDriver *d, gboolean persistent);
 void afamqp_dd_set_user(LogDriver *d, const gchar *user);
 void afamqp_dd_set_password(LogDriver *d, const gchar *password);
