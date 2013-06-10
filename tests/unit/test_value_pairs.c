@@ -62,7 +62,7 @@ testcase(const gchar *scope, const gchar *exclude, const gchar *expected, GPtrAr
   value_pairs_add_scope(vp, scope);
   if (exclude)
     value_pairs_add_glob_pattern(vp, exclude, FALSE);
-  value_pairs_add_pair(vp, configuration, "test.key", "$MESSAGE");
+  value_pairs_add_pair(vp, configuration, "test.key", "$MESSAGE", NULL);
 
   if (transformers)
     {
