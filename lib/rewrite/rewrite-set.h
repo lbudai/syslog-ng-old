@@ -28,6 +28,6 @@
 #include "rewrite/rewrite-expr.h"
 
 /* LogRewriteSet */
-LogRewrite *log_rewrite_set_new(const gchar *new_value);
+LogRewrite *log_rewrite_set_new(const gchar *new_value, GError **error);
 
 #endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2012 BalaBit IT Ltd, Budapest, Hungary
+ * Copyright (c) 2002-2013 BalaBit IT Ltd, Budapest, Hungary
  * Copyright (c) 1998-2012 Balázs Scheidler
  *
  * This library is free software; you can redistribute it and/or
@@ -76,7 +76,10 @@ rewrite_expr_list
 rewrite_expr
         : KW_SUBST '(' string string
           {
-            last_rewrite = log_rewrite_subst_new($4);
+            GError *error;
+
+            last_rewrite = log_rewrite_subst_new($4, &error);
+            CHECK_ERROR(last_rewrite, @4, "Error compiling template; %s", error->message);
             free($4);
           }
           rewrite_subst_opts ')'
@@ -87,7 +90,10 @@ rewrite_expr
           }
         | KW_SET '(' string
           {
-            last_rewrite = log_rewrite_set_new($3);
+            GError *error;
+
+            last_rewrite = log_rewrite_set_new($3, &error);
+            CHECK_ERROR(last_rewrite, @3, "Error compiling template; %s", error->message);
             free($3);
           }
           rewrite_expr_opts ')'                 { $$ = last_rewrite; }
