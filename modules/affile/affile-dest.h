@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2012 BalaBit IT Ltd, Budapest, Hungary
+ * Copyright (c) 2002-2013 BalaBit IT Ltd, Budapest, Hungary
  * Copyright (c) 1998-2012 Balázs Scheidler
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -53,8 +53,8 @@ typedef struct _AFFileDestDriver
   gint time_reap;
 } AFFileDestDriver;
 
-LogDriver *affile_dd_new(gchar *filename);
-LogDriver *afpipe_dd_new(gchar *filename);
+LogDriver *affile_dd_new(gchar *filename, GError **error);
+LogDriver *afpipe_dd_new(gchar *filename, GError **error);
 
 void affile_dd_set_create_dirs(LogDriver *s, gboolean create_dirs);
 void affile_dd_set_fsync(LogDriver *s, gboolean enable);

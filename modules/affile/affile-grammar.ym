@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2012 BalaBit IT Ltd, Budapest, Hungary
+ * Copyright (c) 2002-2013 BalaBit IT Ltd, Budapest, Hungary
  * Copyright (c) 1998-2012 Balázs Scheidler
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -144,7 +144,10 @@ dest_affile
 dest_affile_params
 	: string
 	  {
-	    last_driver = *instance = affile_dd_new($1);
+	    GError *error;
+
+	    last_driver = *instance = affile_dd_new($1, &error);
+	    CHECK_ERROR(last_driver, @1, "Error compiling template; %s", error->message);
 	    free($1);
 	    last_writer_options = &((AFFileDestDriver *) last_driver)->writer_options;
 	    last_file_perm_options = &((AFFileDestDriver *) last_driver)->file_perm_options;
@@ -171,7 +174,10 @@ dest_affile_option
 dest_afpipe_params
 	: string
 	  {
-	    last_driver = *instance = afpipe_dd_new($1);
+	    GError *error;
+
+	    last_driver = *instance = afpipe_dd_new($1, &error);
+	    CHECK_ERROR(last_driver, @1, "Error compiling template; %s", error->message);
 	    free($1);
 	    last_writer_options = &((AFFileDestDriver *) last_driver)->writer_options;
 	    last_file_perm_options = &((AFFileDestDriver *) last_driver)->file_perm_options;

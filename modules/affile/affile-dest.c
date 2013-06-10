@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2012 BalaBit IT Ltd, Budapest, Hungary
+ * Copyright (c) 2002-2013 BalaBit IT Ltd, Budapest, Hungary
  * Copyright (c) 1998-2012 Balázs Scheidler
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -703,17 +703,24 @@ affile_dd_free(LogPipe *s)
 }
 
 static AFFileDestDriver *
-affile_dd_new_instance(gchar *filename)
+affile_dd_new_instance(gchar *filename, GError **error)
 {
   AFFileDestDriver *self = g_new0(AFFileDestDriver, 1);
+  LogTemplate *filename_template;
+
+  filename_template = log_template_new(configuration, NULL);
+  if (!log_template_compile(filename_template, filename, error))
+    {
+      log_template_unref(filename_template);
+      return NULL;
+    }
 
   log_dest_driver_init_instance(&self->super);
   self->super.super.super.init = affile_dd_init;
   self->super.super.super.deinit = affile_dd_deinit;
   self->super.super.super.queue = affile_dd_queue;
   self->super.super.super.free_fn = affile_dd_free;
-  self->filename_template = log_template_new(configuration, NULL);
-  log_template_compile(self->filename_template, filename, NULL);
+  self->filename_template = filename_template;
   log_writer_options_defaults(&self->writer_options);
   file_perm_options_defaults(&self->file_perm_options);
   self->writer_options.mark_mode = MM_NONE;
@@ -728,15 +735,15 @@ affile_dd_new_instance(gchar *filename)
 }
 
 LogDriver *
-affile_dd_new(gchar *filename)
+affile_dd_new(gchar *filename, GError **error)
 {
-  return &affile_dd_new_instance(filename)->super.super;
+  return &affile_dd_new_instance(filename, error)->super.super;
 }
 
 LogDriver *
-afpipe_dd_new(gchar *filename)
+afpipe_dd_new(gchar *filename, GError **error)
 {
-  AFFileDestDriver *self = affile_dd_new_instance(filename);
+  AFFileDestDriver *self = affile_dd_new_instance(filename, error);
   self->is_pipe = TRUE;
   return &self->super.super;
 }
