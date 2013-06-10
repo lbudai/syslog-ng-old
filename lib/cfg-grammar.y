@@ -1065,8 +1065,24 @@ vp_options
 	;
 
 vp_option
-        : KW_PAIR '(' string ':' string ')'      { value_pairs_add_pair(last_value_pairs, configuration, $3, $5); free($3); free($5); }
-        | KW_PAIR '(' string string ')'          { value_pairs_add_pair(last_value_pairs, configuration, $3, $4); free($3); free($4); }
+        : KW_PAIR '(' string ':' string ')'
+        {
+          GError *error;
+
+          CHECK_ERROR(value_pairs_add_pair(last_value_pairs, configuration, $3, $5, &error),
+                      @5, "Error compiling template; %s", error->message);
+          free($3);
+          free($5);
+        }
+        | KW_PAIR '(' string string ')'
+        {
+          GError *error;
+
+          CHECK_ERROR(value_pairs_add_pair(last_value_pairs, configuration, $3, $4, &error),
+                      @4, "Error compiling template; %s", error->message);
+          free($3);
+          free($4);
+        }
         | KW_KEY '(' string KW_REKEY '('
         {
           last_vp_transset = value_pairs_transform_set_new($3);
