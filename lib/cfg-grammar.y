@@ -1067,7 +1067,7 @@ vp_options
 vp_option
         : KW_PAIR '(' string ':' string ')'
         {
-          GError *error;
+          GError *error = NULL;
 
           CHECK_ERROR(value_pairs_add_pair(last_value_pairs, configuration, $3, $5, &error),
                       @5, "Error compiling template; %s", error->message);
@@ -1076,7 +1076,7 @@ vp_option
         }
         | KW_PAIR '(' string string ')'
         {
-          GError *error;
+          GError *error = NULL;
 
           CHECK_ERROR(value_pairs_add_pair(last_value_pairs, configuration, $3, $4, &error),
                       @4, "Error compiling template; %s", error->message);

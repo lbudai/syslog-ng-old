@@ -144,7 +144,7 @@ dest_affile
 dest_affile_params
 	: string
 	  {
-	    GError *error;
+	    GError *error = NULL;
 
 	    last_driver = *instance = affile_dd_new($1, &error);
 	    CHECK_ERROR(last_driver, @1, "Error compiling template; %s", error->message);
@@ -174,7 +174,7 @@ dest_affile_option
 dest_afpipe_params
 	: string
 	  {
-	    GError *error;
+	    GError *error = NULL;
 
 	    last_driver = *instance = afpipe_dd_new($1, &error);
 	    CHECK_ERROR(last_driver, @1, "Error compiling template; %s", error->message);

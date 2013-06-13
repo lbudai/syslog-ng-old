@@ -82,7 +82,7 @@ afamqp_option
 	| KW_EXCHANGE_TYPE '(' string ')'	{ afamqp_dd_set_exchange_type(last_driver, $3); free($3); }
 	| KW_ROUTING_KEY '(' string ')'
         {
-          GError *error;
+          GError *error = NULL;
 
           CHECK_ERROR(afamqp_dd_set_routing_key(last_driver, $3, &error), @3,
                       "Error compiling template; %s", error->message);
@@ -90,7 +90,7 @@ afamqp_option
         }
         | KW_BODY '(' string ')'
         {
-          GError *error;
+          GError *error = NULL;
 
           CHECK_ERROR(afamqp_dd_set_body(last_driver, $3,  &error), @3,
                       "Error compiling template; %s", error->message);
