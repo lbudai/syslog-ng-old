@@ -4,4 +4,7 @@ compatinclude_HEADERS		= \
 	lib/compat/compat.h
 
 compat_sources			= \
-	lib/compat/compat.c
+	lib/compat/memrchr.c	  \
+	lib/compat/pread.c	  \
+	lib/compat/strcasestr.c	  \
+	lib/compat/strtollmax.c
