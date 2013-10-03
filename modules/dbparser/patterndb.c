@@ -25,7 +25,7 @@
 #include "logmsg.h"
 #include "tags.h"
 #include "template/templates.h"
-#include "compat.h"
+#include "compat/compat.h"
 #include "misc.h"
 #include "filter/filter-expr-parser.h"
 #include "logpipe.h"
