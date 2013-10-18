@@ -37,6 +37,7 @@ void afmongodb_dd_set_collection(LogDriver *d, const gchar *collection);
 void afmongodb_dd_set_value_pairs(LogDriver *d, ValuePairs *vp);
 void afmongodb_dd_set_safe_mode(LogDriver *d, gboolean state);
 void afmongodb_dd_set_path(LogDriver *d, const gchar *path);
+void afmongodb_dd_set_flush_lines(LogDriver *d, gint flush_lines);
 
 gboolean afmongodb_dd_check_address(LogDriver *d, gboolean local);
 

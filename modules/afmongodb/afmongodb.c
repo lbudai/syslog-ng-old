@@ -60,6 +60,7 @@ typedef struct
   gboolean safe_mode;
   LogTemplateOptions template_options;
   time_t last_msg_stamp;
+  gint flush_lines;
 
   ValuePairs *vp;
 
@@ -70,7 +71,12 @@ typedef struct
   gchar *ns;
 
   GString *current_value;
-  bson *bson;
+
+  struct
+  {
+    bson **buffer;
+    gint size;
+  } bson;
 } MongoDBDestDriver;
 
 /*
@@ -177,6 +183,14 @@ afmongodb_dd_set_safe_mode(LogDriver *d, gboolean state)
   MongoDBDestDriver *self = (MongoDBDestDriver *)d;
 
   self->safe_mode = state;
+}
+
+void
+afmongodb_dd_set_flush_lines(LogDriver *d, gint flush_lines)
+{
+  MongoDBDestDriver *self = (MongoDBDestDriver *)d;
+
+  self->flush_lines = flush_lines;
 }
 
 /*
@@ -294,7 +308,7 @@ afmongodb_vp_obj_end(const gchar *name,
   if (prev_data)
     root = (bson *)*prev_data;
   else
-    root = self->bson;
+    root = self->bson.buffer[self->bson.size];
 
   if (prefix_data)
     {
@@ -319,7 +333,7 @@ afmongodb_vp_process_value(const gchar *name, const gchar *prefix,
   if (prefix_data)
     o = (bson *)*prefix_data;
   else
-    o = self->bson;
+    o = self->bson.buffer[self->bson.size];
 
   switch (type)
     {
@@ -416,6 +430,7 @@ afmongodb_worker_insert (LogThrDestDriver *s)
   guint8 *oid;
   LogMessage *msg;
   LogPathOptions path_options = LOG_PATH_OPTIONS_INIT;
+  bson *current_bson;
 
   afmongodb_dd_connect(self, TRUE);
 
@@ -425,10 +440,12 @@ afmongodb_worker_insert (LogThrDestDriver *s)
 
   msg_set_context(msg);
 
-  bson_reset (self->bson);
+  current_bson = self->bson.buffer[self->bson.size];
+
+  bson_reset (current_bson);
 
   oid = mongo_util_oid_new_with_time (self->last_msg_stamp, self->seq_num);
-  bson_append_oid (self->bson, "_id", oid);
+  bson_append_oid (current_bson, "_id", oid);
   g_free (oid);
 
   success = value_pairs_walk(self->vp,
@@ -438,20 +455,26 @@ afmongodb_worker_insert (LogThrDestDriver *s)
                              msg, self->seq_num,
                              &self->template_options,
                              self);
-  bson_finish (self->bson);
+  bson_finish (current_bson);
 
   if (!success && !need_drop)
     success = TRUE;
 
   if (success)
     {
-      if (!mongo_sync_cmd_insert_n(self->conn, self->ns, 1,
-                                   (const bson **)&self->bson))
+      self->bson.size++;
+
+      if (self->bson.size >= self->flush_lines)
         {
-          msg_error("Network error while inserting into MongoDB",
-                    evt_tag_int("time_reopen", self->super.time_reopen),
-                    NULL);
-          success = FALSE;
+          if (!mongo_sync_cmd_insert_n(self->conn, self->ns, self->bson.size,
+                                       (const bson **)self->bson.buffer))
+            {
+              msg_error("Network error while inserting into MongoDB",
+                        evt_tag_int("time_reopen", self->super.time_reopen),
+                        NULL);
+              success = FALSE;
+            }
+          self->bson.size = 0;
         }
     }
 
@@ -484,6 +507,7 @@ static void
 afmongodb_worker_thread_init(LogThrDestDriver *d)
 {
   MongoDBDestDriver *self = (MongoDBDestDriver *)d;
+  gint i;
 
   afmongodb_dd_connect(self, FALSE);
 
@@ -491,18 +515,26 @@ afmongodb_worker_thread_init(LogThrDestDriver *d)
 
   self->current_value = g_string_sized_new(256);
 
-  self->bson = bson_new_sized(4096);
+  self->bson.buffer = g_new(bson *, self->flush_lines + 1);
+  self->bson.size = 0;
+
+  for (i = 0; i <= self->flush_lines; i++)
+    self->bson.buffer[i] = bson_new_sized(4096);
 }
 
 static void
 afmongodb_worker_thread_deinit(LogThrDestDriver *d)
 {
   MongoDBDestDriver *self = (MongoDBDestDriver *)d;
+  gint i;
 
   g_free (self->ns);
   g_string_free (self->current_value, TRUE);
 
-  bson_free (self->bson);
+  for (i = 0; i <= self->flush_lines; i++)
+    bson_free(self->bson.buffer[i]);
+
+  g_free(self->bson.buffer);
 }
 
 /*
@@ -622,6 +654,7 @@ afmongodb_dd_new(GlobalConfig *cfg)
   afmongodb_dd_set_database((LogDriver *)self, "syslog");
   afmongodb_dd_set_collection((LogDriver *)self, "messages");
   afmongodb_dd_set_safe_mode((LogDriver *)self, FALSE);
+  afmongodb_dd_set_flush_lines((LogDriver *)self, 1);
 
   init_sequence_number(&self->seq_num);
 
