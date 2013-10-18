@@ -423,6 +423,26 @@ afmongodb_vp_process_value(const gchar *name, const gchar *prefix,
 }
 
 static gboolean
+afmongodb_worker_flush (MongoDBDestDriver *self)
+{
+  gboolean success = TRUE;
+
+  if (!mongo_sync_cmd_insert_n(self->conn, self->ns, self->bson.size,
+                               (const bson **)self->bson.buffer))
+    {
+      msg_error("Network error while inserting into MongoDB",
+                evt_tag_int("time_reopen", self->super.time_reopen),
+                NULL);
+      success = FALSE;
+    }
+
+  log_queue_ack_backlog(self->super.queue, self->bson.size);
+  self->bson.size = 0;
+
+  return success;
+}
+
+static gboolean
 afmongodb_worker_insert (LogThrDestDriver *s)
 {
   MongoDBDestDriver *self = (MongoDBDestDriver *)s;
@@ -465,17 +485,7 @@ afmongodb_worker_insert (LogThrDestDriver *s)
       self->bson.size++;
 
       if (self->bson.size >= self->flush_lines)
-        {
-          if (!mongo_sync_cmd_insert_n(self->conn, self->ns, self->bson.size,
-                                       (const bson **)self->bson.buffer))
-            {
-              msg_error("Network error while inserting into MongoDB",
-                        evt_tag_int("time_reopen", self->super.time_reopen),
-                        NULL);
-              success = FALSE;
-            }
-          self->bson.size = 0;
-        }
+        success = afmongodb_worker_flush (self);
     }
 
   msg_set_context(NULL);
@@ -484,7 +494,6 @@ afmongodb_worker_insert (LogThrDestDriver *s)
     {
       stats_counter_inc(self->super.stored_messages);
       step_sequence_number(&self->seq_num);
-      log_msg_ack(msg, &path_options);
       log_msg_unref(msg);
     }
   else
