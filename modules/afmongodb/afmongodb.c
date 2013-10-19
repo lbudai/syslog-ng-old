@@ -454,7 +454,7 @@ afmongodb_worker_insert (LogThrDestDriver *s)
 
   afmongodb_dd_connect(self, TRUE);
 
-  success = log_queue_pop_head(self->super.queue, &msg, &path_options, FALSE, FALSE);
+  success = log_queue_pop_head(self->super.queue, &msg, &path_options, TRUE, FALSE);
   if (!success)
     return TRUE;
 
