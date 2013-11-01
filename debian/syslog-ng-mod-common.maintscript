@@ -23,9 +23,11 @@ case "${DPKG_MAINTSCRIPT_PACKAGE}" in
                 ;;
 esac
 
-if dpkg-maintscript-helper supports rm_conffile; then
-        dpkg-maintscript-helper rm_conffile \
-                /etc/syslog-ng/conf.d/00load-${modname}.conf 3.4.0~ -- "$@"
+if [ -x "/usr/bin/dpkg-maintscript-helper" ]; then
+        if dpkg-maintscript-helper supports rm_conffile; then
+                dpkg-maintscript-helper rm_conffile \
+                        /etc/syslog-ng/conf.d/00load-${modname}.conf 3.4.0~ -- "$@"
+        fi
 fi
 
 #DEBHELPER#
