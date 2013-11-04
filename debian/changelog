@@ -1,3 +1,12 @@
+syslog-ng (3.4.5-1~mhp1) unstable; urgency=low
+
+  [ Gergely Nagy <algernon@madhouse-project.org> ]
+  * New upstream release.
+  * Use gzip for the arch:all package.
+  * Only use dpkg-maintscript-helper if it is available.
+
+ -- Gergely Nagy <algernon@madhouse-project.org>  Mon, 04 Nov 2013 10:05:53 +0100
+
 syslog-ng (3.4.4-1~mhp1) unstable; urgency=low
 
   [ Gergely Nagy <algernon@madhouse-project.org> ]
