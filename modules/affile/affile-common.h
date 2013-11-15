@@ -26,9 +26,14 @@
 
 #include "file-perms.h"
 
-gboolean affile_open_file(gchar *name, gint flags,
-                          const FilePermOptions *perm_options,
-                          gboolean create_dirs, gboolean privileged,
-                          gboolean is_pipe, gint *fd);
+typedef struct _FileOpenOptions
+{
+  gboolean create_dirs:1,
+           needs_privileges:1,
+           is_pipe:1;
+  gint open_flags;
+} FileOpenOptions;
+
+gboolean affile_open_file(gchar *name, FileOpenOptions *open_opts, FilePermOptions *perm_opts, gint *fd);
 
 #endif

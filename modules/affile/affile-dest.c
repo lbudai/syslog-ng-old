@@ -43,6 +43,9 @@
 #include <time.h>
 #include <stdlib.h>
 
+#define DEFAULT_DW_REOPEN_FLAGS (O_WRONLY | O_CREAT | O_NOCTTY | O_NONBLOCK | O_LARGEFILE)
+#define DEFAULT_DW_REOPEN_FLAGS_PIPE (O_RDWR | O_NOCTTY | O_NONBLOCK | O_LARGEFILE)
+
 /*
  * Threading notes:
  *
@@ -144,9 +147,15 @@ affile_dw_reap(gpointer s)
 }
 
 static gboolean
+_affile_dw_reopen_file(AFFileDestWriter *self, gchar *name, gint *fd)
+{
+  return  affile_open_file(name, &self->owner->file_open_options, &self->owner->file_perm_options, fd);
+}
+
+static gboolean
 affile_dw_reopen(AFFileDestWriter *self)
 {
-  int fd, flags;
+  int fd;
   struct stat st;
 
   self->last_open_stamp = self->last_msg_stamp;
@@ -161,17 +170,10 @@ affile_dw_reopen(AFFileDestWriter *self)
       unlink(self->filename);
     }
 
-  if (self->owner->is_pipe)
-    flags = O_RDWR | O_NOCTTY | O_NONBLOCK | O_LARGEFILE;
-  else
-    flags = O_WRONLY | O_CREAT | O_NOCTTY | O_NONBLOCK | O_LARGEFILE | O_APPEND;
-
-
-  if (affile_open_file(self->filename, flags, &self->owner->file_perm_options,
-                       self->owner->create_dirs, FALSE, self->owner->is_pipe, &fd))
+  if (_affile_dw_reopen_file(self, self->filename, &fd))
     {
       log_writer_reopen(self->writer,
-                        self->owner->is_pipe
+                        self->owner->file_open_options.is_pipe
                         ? log_proto_text_client_new(log_transport_pipe_new(fd), &self->owner->writer_options.proto_options.super)
                         : log_proto_file_writer_new(log_transport_file_new(fd), &self->owner->writer_options.proto_options.super,
                                                     self->owner->writer_options.flush_lines,
@@ -187,6 +189,7 @@ affile_dw_reopen(AFFileDestWriter *self)
                 NULL);
       return self->owner->super.super.optional;
     }
+
   return TRUE;
 }
 
@@ -209,7 +212,7 @@ affile_dw_init(LogPipe *s)
       guint32 flags;
 
       flags = LW_FORMAT_FILE |
-        (self->owner->is_pipe ? 0 : LW_SOFT_FLOW_CONTROL);
+        (self->owner->file_open_options.is_pipe ? 0 : LW_SOFT_FLOW_CONTROL);
 
       self->writer = log_writer_new(flags);
     }
@@ -217,7 +220,7 @@ affile_dw_init(LogPipe *s)
                          s,
                          &self->owner->writer_options,
                          STATS_LEVEL1,
-                         self->owner->is_pipe ? SCS_PIPE : SCS_FILE,
+                         self->owner->file_open_options.is_pipe ? SCS_PIPE : SCS_FILE,
                          self->owner->super.super.id,
                          self->filename);
   log_writer_set_queue(self->writer, log_dest_driver_acquire_queue(&self->owner->super, affile_dw_format_persist_name(self)));
@@ -345,7 +348,7 @@ affile_dd_set_create_dirs(LogDriver *s, gboolean create_dirs)
 {
   AFFileDestDriver *self = (AFFileDestDriver *) s;
   
-  self->create_dirs = create_dirs;
+  self->file_open_options.create_dirs = create_dirs;
 }
 
 void 
@@ -428,7 +431,7 @@ affile_dd_init(LogPipe *s)
     return FALSE;
 
   if (cfg->create_dirs)
-    self->create_dirs = TRUE;
+    self->file_open_options.create_dirs = TRUE;
   if (self->time_reap == -1)
     self->time_reap = cfg->time_reap;
   
@@ -714,6 +717,9 @@ affile_dd_new_instance(gchar *filename)
       self->filename_is_a_template = TRUE;
     }
   self->time_reap = -1;
+  self->file_open_options.is_pipe = FALSE;
+  self->file_open_options.needs_privileges = FALSE;
+  self->file_open_options.open_flags = DEFAULT_DW_REOPEN_FLAGS;
   g_static_mutex_init(&self->lock);
   return self;
 }
@@ -728,6 +734,8 @@ LogDriver *
 afpipe_dd_new(gchar *filename)
 {
   AFFileDestDriver *self = affile_dd_new_instance(filename);
-  self->is_pipe = TRUE;
+  self->file_open_options.is_pipe = TRUE;
+  self->file_open_options.open_flags = DEFAULT_DW_REOPEN_FLAGS_PIPE;
+
   return &self->super.super;
 }
