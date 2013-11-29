@@ -34,6 +34,7 @@
 #include "timeutils.h"
 #include "mainloop-worker.h"
 
+#include <dbi/dbi.h>
 #include <string.h>
 
 #if ENABLE_SSL
@@ -41,6 +42,7 @@
 #endif
 
 static gboolean dbi_initialized = FALSE;
+static dbi_inst dbi_instance;
 static const char *s_oracle = "oracle";
 static const char *s_freetds = "freetds";
 
@@ -549,7 +551,7 @@ afsql_dd_ensure_initialized_connection(AFSqlDestDriver *self)
   if (self->dbi_ctx)
     return TRUE;
 
-  self->dbi_ctx = dbi_conn_new(self->type);
+  self->dbi_ctx = dbi_conn_new_r(self->type, dbi_instance);
 
   if (!self->dbi_ctx)
     {
@@ -1125,7 +1127,7 @@ afsql_dd_init(LogPipe *s)
 
   if (!dbi_initialized)
     {
-      gint rc = dbi_initialize(NULL);
+      gint rc = dbi_initialize_r(NULL, &dbi_instance);
 
       if (rc < 0)
         {
