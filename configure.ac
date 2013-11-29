@@ -24,7 +24,7 @@ dnl dependencies
 GLIB_MIN_VERSION="2.10.1"
 EVTLOG_MIN_VERSION="0.2.12"
 OPENSSL_MIN_VERSION="0.9.8"
-LIBDBI_MIN_VERSION="0.8.0"
+LIBDBI_MIN_VERSION="0.9.0"
 IVYKIS_MIN_VERSION="0.36.1"
 JSON_C_MIN_VERSION="0.9"
 PCRE_MIN_VERSION="6.1"
@@ -631,7 +631,7 @@ PKG_CHECK_MODULES(LIBDBI, dbi >= $LIBDBI_MIN_VERSION, libdbi_pkgconfig_not_found
 
 if test "$libdbi_pkgconfig_not_found" -eq 1; then
 	dnl if libdbi has no .pc file, try it without one
-	AC_CHECK_LIB(dbi, dbi_initialize, LIBDBI_LIBS="-ldbi"; LIBDBI_CFLAGS="-I/usr/include")
+	AC_CHECK_LIB(dbi, dbi_initialize_r, LIBDBI_LIBS="-ldbi"; LIBDBI_CFLAGS="-I/usr/include")
 fi
 
 if test "x$enable_sql" = "xauto"; then
