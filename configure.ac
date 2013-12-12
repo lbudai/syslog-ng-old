@@ -82,6 +82,10 @@ AC_ARG_WITH(pidfile-dir,
    [  --with-pidfile-dir=path   Use path as the directory for storing pidfiles],
    pidfiledir=$with_pidfile_dir)
 
+AC_ARG_ENABLE(monitor-inotify,
+   [  --enable-monitor-inotify    Enable inotify based file monitoring support.],,enable_monitor_inotify="auto")
+
+
 AC_ARG_WITH(module-dir,
    [  --with-module-dir=path   Use path as the directory to install modules into],
    moduledir=$with_module_dir)
@@ -644,6 +648,41 @@ if test "x$enable_sql" = "xauto"; then
 		AC_MSG_RESULT(no)
 	fi
 fi
+
+ dnl ***************************************************************************
+dnl Linux inotify
+dnl ***************************************************************************
+if test "x$enable_monitor_inotify" = "xyes" -o "x$enable_monitor_inotify" = "xauto"  ; then
+  dnl We need to check if the right inotify version is accessible
+
+  dnl It's hard to find a good test on how to check the correct
+  dnl inotify version. They changed the headers a lot.
+
+        AC_CHECK_HEADERS(sys/inotify.h)
+        AC_CHECK_HEADERS(inotifytools/inotify.h)
+
+        AC_TRY_COMPILE([
+      #include <unistd.h>
+      #ifdef HAVE_SYS_INOTIFY_H
+      #include <sys/inotify.h>
+      #elif HAVE_INOTIFYTOOLS_INOTIFY_H
+      #include <inotifytools/inotify.h>
+      #endif
+    ],
+    [ int a = inotify_init(); int b =  IN_MODIFY | IN_MOVED_TO | IN_CREATE; ],
+    [inotify_present="yes"],
+    [inotify_present="no"]
+  )
+
+  if test  "x$enable_monitor_inotify" = "xauto"; then
+    enable_monitor_inotify=$inotify_present
+  else
+    if test "x$inotify_present" = "xno"; then
+      AC_MSG_ERROR([Inotify support enabled but inotify header (sys/inotify.h, inotifytools/inotify.h) not found])
+    fi
+  fi
+fi
+
 
 dnl ***************************************************************************
 dnl GLib headers/libraries
@@ -1223,6 +1262,7 @@ if test -n "$env_ld_library_path"; then
 fi
 AC_DEFINE_UNQUOTED(MODULE_PATH, "$module_path", [module search path])
 
+AC_DEFINE_UNQUOTED(ENABLE_MONITOR_INOTIFY, `enable_value $enable_monitor_inotify`, [Enable inotify support])
 AC_DEFINE_UNQUOTED(WITH_COMPILE_DATE, $wcmp_date, [Include the compile date in the binary])
 AC_DEFINE_UNQUOTED(ENABLE_DEBUG, `enable_value $enable_debug`, [Enable debugging])
 AC_DEFINE_UNQUOTED(ENABLE_SSL, `enable_value $enable_ssl`, [Enable SSL support])
@@ -1335,6 +1375,7 @@ echo "  tcp-wrapper support         : ${enable_tcp_wrapper:=no}"
 echo "  Linux capability support    : ${enable_linux_caps:=no}"
 echo "  Env wrapper support         : ${enable_env_wrapper:=no}"
 echo "  systemd support             : ${enable_systemd:=no} (unit dir: ${systemdsystemunitdir:=none})"
+echo "  Monitor-Inotify support     : ${enable_monitor_inotify:=no}"
 echo " Modules:"
 echo "  Module search path          : ${module_path}"
 echo "  Sun STREAMS support (module): ${enable_sun_streams:=no}"
