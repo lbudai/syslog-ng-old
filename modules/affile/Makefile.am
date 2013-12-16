@@ -16,7 +16,9 @@ modules_affile_libaffile_la_SOURCES	=			\
 	modules/affile/affile-parser.h				\
 	modules/affile/affile-plugin.c				\
 	modules/affile/filemonitor.c				\
-	modules/affile/filemonitor.h
+	modules/affile/filemonitor.h				\
+	modules/affile/path_getmaxlen.h				\
+	modules/affile/path_getmaxlen.c
 
 BUILT_SOURCES				+= 			\
 	modules/affile/affile-grammar.y				\
