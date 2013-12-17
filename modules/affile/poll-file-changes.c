@@ -47,91 +47,26 @@ typedef struct _PollFileChanges
   LogPipe *control;
 } PollFileChanges;
 
-/* follow timer callback. Check if the file has new content, or deleted or
- * moved.  Ran every follow_freq seconds.  */
-static void
-poll_file_changes_check_file(gpointer s)
+static gboolean
+_check_follow_file(PollFileChanges *self, struct stat *last_stat, off_t last_pos)
 {
-  PollFileChanges *self = (PollFileChanges *) s;
-  struct stat st, followed_st;
-  off_t pos = -1;
-  gint fd = self->fd;
-
-  msg_trace("Checking if the followed file has new lines",
-            evt_tag_str("follow_filename", self->follow_filename),
-            NULL);
-  if (fd >= 0)
-    {
-      pos = lseek(fd, 0, SEEK_CUR);
-      if (pos == (off_t) -1)
-        {
-          msg_error("Error invoking seek on followed file",
-                    evt_tag_errno("error", errno),
-                    NULL);
-          goto reschedule;
-        }
-
-      if (fstat(fd, &st) < 0)
-        {
-          if (errno == ESTALE)
-            {
-              msg_trace("log_reader_fd_check file moved ESTALE",
-                        evt_tag_str("follow_filename", self->follow_filename),
-                        NULL);
-              log_pipe_notify(self->control, NC_FILE_MOVED, self);
-              return;
-            }
-          else
-            {
-              msg_error("Error invoking fstat() on followed file",
-                        evt_tag_errno("error", errno),
-                        NULL);
-              goto reschedule;
-            }
-        }
-
-      msg_trace("log_reader_fd_check",
-                evt_tag_int("pos", pos),
-                evt_tag_int("size", st.st_size),
-                NULL);
-
-      if (pos < st.st_size || !S_ISREG(st.st_mode))
-        {
-          /* we have data to read */
-          poll_events_invoke_callback(s);
-          return;
-        }
-      else if (pos == st.st_size)
-        {
-          /* we are at EOF */
-          log_pipe_notify(self->control, NC_FILE_EOF, self);
-          return;
-        }
-      else if (pos > st.st_size)
-        {
-          /* the last known position is larger than the current size of the file. it got truncated. Restart from the beginning. */
-          log_pipe_notify(self->control, NC_FILE_MOVED, self);
-
-          /* we may be freed by the time the notification above returns */
-          return;
-        }
-    }
+  struct stat followed_st;
 
   if (self->follow_filename)
     {
       if (stat(self->follow_filename, &followed_st) != -1)
         {
-          if (fd < 0 || (st.st_ino != followed_st.st_ino && followed_st.st_size > 0))
+          if (self->fd < 0 || (last_stat && last_stat->st_ino != followed_st.st_ino && followed_st.st_size > 0))
             {
               msg_trace("log_reader_fd_check file moved eof",
-                        evt_tag_int("pos", pos),
+                        evt_tag_int("pos", last_pos),
                         evt_tag_int("size", followed_st.st_size),
                         evt_tag_str("follow_filename", self->follow_filename),
                         NULL);
               /* file was moved and we are at EOF, follow the new file */
               log_pipe_notify(self->control, NC_FILE_MOVED, self);
               /* we may be freed by the time the notification above returns */
-              return;
+              return FALSE;
             }
         }
       else
@@ -141,7 +76,92 @@ poll_file_changes_check_file(gpointer s)
                       NULL);
         }
     }
- reschedule:
+  return TRUE;
+}
+
+static void
+_check_opened_file(PollFileChanges *self)
+{
+  off_t pos = -1;
+  gint fd = self->fd;
+  struct stat st;
+
+  pos = lseek(fd, 0, SEEK_CUR);
+  if (pos == (off_t) -1)
+    {
+      msg_error("Error invoking seek on followed file",
+                evt_tag_errno("error", errno),
+                NULL);
+      poll_events_update_watches(&self->super, G_IO_IN);
+      return;
+    }
+
+  if (fstat(fd, &st) < 0)
+    {
+      if (errno == ESTALE)
+        {
+          msg_trace("log_reader_fd_check file moved ESTALE",
+                    evt_tag_str("follow_filename", self->follow_filename),
+                    NULL);
+          log_pipe_notify(self->control, NC_FILE_MOVED, self);
+          return;
+        }
+      else
+        {
+          msg_error("Error invoking fstat() on followed file",
+                    evt_tag_errno("error", errno),
+                    NULL);
+          poll_events_update_watches(&self->super, G_IO_IN);
+          return;
+        }
+    }
+
+  msg_trace("log_reader_fd_check",
+            evt_tag_int("pos", pos),
+            evt_tag_int("size", st.st_size),
+            NULL);
+
+  if (!_check_follow_file(self, &st, pos))
+    return;
+
+  if (pos < st.st_size || !S_ISREG(st.st_mode))
+    {
+      /* we have data to read */
+      poll_events_invoke_callback(&self->super);
+    }
+  else if (pos == st.st_size)
+    {
+      /* we are at EOF */
+      log_pipe_notify(self->control, NC_FILE_EOF, self);
+    }
+  else if (pos > st.st_size)
+    {
+      /* the last known position is larger than the current size of the file. it got truncated. Restart from the beginning. */
+      log_pipe_notify(self->control, NC_FILE_MOVED, self);
+    }
+}
+
+/* follow timer callback. Check if the file has new content, or deleted or
+ * moved.  Ran every follow_freq seconds.  */
+static void
+poll_file_changes_check_file(gpointer s)
+{
+  PollFileChanges *self = (PollFileChanges *) s;
+
+  msg_trace("Checking if the followed file has new lines",
+            evt_tag_str("follow_filename", self->follow_filename),
+            NULL);
+
+  if (self->fd >= 0)
+    {
+      _check_opened_file(self);
+      return;
+    }
+  else
+    {
+      if (!_check_follow_file(self, NULL, -1))
+        return;
+    }
   poll_events_update_watches(s, G_IO_IN);
 }
 
