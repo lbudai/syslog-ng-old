@@ -52,6 +52,17 @@
 #define DEFAULT_SD_OPEN_FLAGS (O_RDONLY | O_NOCTTY | O_NONBLOCK | O_LARGEFILE)
 #define DEFAULT_SD_OPEN_FLAGS_PIPE (O_RDWR | O_NOCTTY | O_NONBLOCK | O_LARGEFILE)
 
+static void
+_reader_free(LogReader **s)
+{
+  if (*s)
+  {
+    log_pipe_deinit((LogPipe *) *s);
+    log_pipe_unref((LogPipe *) *s);
+    *s = NULL;
+  }
+}
+
 gboolean
 affile_sd_set_multi_line_mode(LogDriver *s, const gchar *mode)
 {
@@ -247,101 +258,205 @@ affile_sd_construct_proto(AFFileSourceDriver *self, gint fd)
     }
 }
 
-/* NOTE: runs in the main thread */
-static void
-affile_sd_notify(LogPipe *s, gint notify_code, gpointer user_data)
+static gchar*
+_monitor_pop_next_file(LogPipe *s, gboolean *last_item)
 {
-  AFFileSourceDriver *self = (AFFileSourceDriver *) s;
-  GlobalConfig *cfg = log_pipe_get_config(s);
-  gint fd;
-  
-  switch (notify_code)
+  gchar *ret = NULL;
+  AFFileWildcardSourceDriver *self = (AFFileWildcardSourceDriver *) s;
+
+  *last_item = FALSE;
+
+  if (g_queue_is_empty(self->file_list))
+    return ret;
+
+  ret = g_queue_pop_head(self->file_list);
+
+  if (ret == END_OF_LIST)
     {
-    case NC_FILE_MOVED:
-      { 
-        msg_verbose("Follow-mode file source moved, tracking of the new file is started",
-                    evt_tag_str("filename", self->filename->str),
-                    NULL);
-        
-        log_pipe_deinit((LogPipe *) self->reader);
-        log_pipe_unref((LogPipe *) self->reader);
-        self->reader = NULL;
-        
-        if (affile_sd_open_file(self, self->filename->str, &fd))
-          {
-            LogProtoServer *proto;
-            PollEvents *poll_events;
-            
-            poll_events = affile_sd_construct_poll_events(self, fd);
-            if (!poll_events)
-              break;
+      /*skip the *END* item and try the next file in the list*/
+      ret = g_queue_pop_head(self->file_list);
+      if (ret)
+        *last_item = TRUE;
+    }
+  else if (self->file_list->length == 0)
+    {
+      *last_item = TRUE;
+    }
+  if (!ret || ret == END_OF_LIST)
+    ret = NULL;
 
-            proto = affile_sd_construct_proto(self, fd);
+  return ret;
+}
 
-            self->reader = log_reader_new();
-            log_reader_reopen(self->reader, proto, poll_events);
+static void
+_monitor_pushback_filename(AFFileWildcardSourceDriver *self, const gchar *filename)
+{
+  /* NOTE: the list contains an allocated copy of the filename, it needs to
+   * be freed when removed from the list.
+   */
+  if (filename != END_OF_LIST)
+    msg_trace("affile_sd_monitor_pushback_filename",
+              evt_tag_str("filename", filename),
+              NULL);
 
-            log_reader_set_options(self->reader,
-                                   s,
-                                   &self->reader_options,
-                                   STATS_LEVEL1,
-                                   SCS_FILE,
-                                   self->super.super.id,
-                                   self->filename->str);
-            log_reader_set_immediate_check(self->reader);
+  if (filename == END_OF_LIST)
+    g_queue_push_tail(self->file_list, END_OF_LIST);
+  else
+    g_queue_push_tail(self->file_list, strdup(filename));
+}
 
-            log_pipe_append((LogPipe *) self->reader, s);
-            if (!log_pipe_init((LogPipe *) self->reader, cfg))
-              {
-                msg_error("Error initializing log_reader, closing fd",
-                          evt_tag_int("fd", fd),
-                          NULL);
-                log_pipe_unref((LogPipe *) self->reader);
-                self->reader = NULL;
-                close(fd);
-              }
-            affile_sd_recover_state(s, cfg, proto);
-          }
-        break;
-      }
-    default:
-      break;
+static void
+affile_sd_add_file_to_the_queue(AFFileWildcardSourceDriver *self, const gchar *filename)
+{
+  /* FIXME: use something else than a linear search */
+  if (g_queue_find_custom(self->file_list, filename, (GCompareFunc)strcmp) == NULL)
+    {
+      _monitor_pushback_filename(self, filename);
+      if (filename != END_OF_LIST)
+        {
+          msg_debug("affile_sd_monitor_callback append", evt_tag_str("file",filename),NULL);
+        }
     }
 }
 
 static void
-affile_sd_queue(LogPipe *s, LogMessage *msg, const LogPathOptions *path_options, gpointer user_data)
+_reopen_log_reader(LogPipe *s, gint fd)
 {
-  AFFileSourceDriver *self = (AFFileSourceDriver *) s;
-  static NVHandle filename_handle = 0;
+  AFFileSourceDriver *self = (AFFileSourceDriver *)s;
+  LogProtoServer *proto;
+  PollEvents *poll_events;
+  GlobalConfig *cfg = log_pipe_get_config(s);
 
-  if (!filename_handle)
-    filename_handle = log_msg_get_value_handle("FILE_NAME");
-  
-  log_msg_set_value(msg, filename_handle, self->filename->str, self->filename->len);
+  poll_events = affile_sd_construct_poll_events(self, fd);
+  if (!poll_events)
+    return;
 
-  log_pipe_forward_msg(s, msg, path_options);
+  proto = affile_sd_construct_proto(self, fd);
+
+  self->reader = log_reader_new();
+
+  log_reader_reopen(self->reader, proto, poll_events);
+
+  log_reader_set_options(self->reader,
+                         s,
+                         &self->reader_options,
+                         STATS_LEVEL1,
+                         SCS_FILE,
+                         self->super.super.id,
+                         self->filename->str);
+  log_reader_set_immediate_check(self->reader);
+
+  log_pipe_append((LogPipe *) self->reader, s);
+  if (!log_pipe_init((LogPipe *) self->reader, cfg))
+    {
+      msg_error("Error initializing log_reader, closing fd",
+                evt_tag_int("fd", fd),
+                NULL);
+      log_pipe_unref((LogPipe *) self->reader);
+      self->reader = NULL;
+      close(fd);
+    }
+
+   affile_sd_recover_state(s, cfg, proto);
 }
 
 static gboolean
-affile_sd_init(LogPipe *s)
+_open_file(LogPipe *s, gchar **filename)
+{
+  AFFileSourceDriver *self = (AFFileSourceDriver *) s;
+  gint fd = -1;
+
+  if (!affile_sd_open_file(self, *filename, &fd))
+    return FALSE;
+
+  g_string_assign(self->filename, *filename);
+  g_free(*filename);
+  *filename = NULL;
+
+  msg_debug("Monitoring new file",
+            evt_tag_str("filename", self->filename->str),
+            NULL);
+
+  _reopen_log_reader(s, fd);
+
+  return TRUE;
+}
+
+
+static void
+_check_wildcard_files(LogPipe *s)
+{
+  AFFileWildcardSourceDriver *self = (AFFileWildcardSourceDriver *) s;
+  gchar *filename = NULL;
+  gboolean end_of_list = FALSE;
+
+  while (!end_of_list)
+    {
+      filename = _monitor_pop_next_file(s, &end_of_list);
+
+      if (!filename)
+          break;
+
+      _reader_free(&self->super.reader);
+
+      if ( _open_file(s, &filename) )
+        break;
+    }
+}
+
+static void
+_on_moved(LogPipe *s)
+{
+  AFFileSourceDriver *self = (AFFileSourceDriver *) s;
+  gint fd;
+
+  msg_verbose("Follow-mode file source moved, tracking of the new file is started",
+              evt_tag_str("filename", self->filename->str),
+              NULL);
+  
+  if (affile_sd_open_file(self, self->filename->str, &fd))
+    {
+      _reader_free(&self->reader);
+      _reopen_log_reader(s, fd);
+    }
+}
+
+static void
+_on_skip(LogPipe *s)
+{
+  AFFileSourceDriver *self = (AFFileSourceDriver *)s;
+
+  log_reader_set_immediate_check(self->reader);
+}
+
+static void
+_wildcard_on_skip(LogPipe *s)
+{
+  AFFileWildcardSourceDriver *self = (AFFileWildcardSourceDriver *)s;
+  
+  _monitor_pushback_filename(self, self->super.filename->str);
+  _check_wildcard_files(s);
+}
+
+static void
+_wildcard_on_eof(LogPipe *s)
+{
+  _check_wildcard_files(s);
+}
+
+static void
+_wildcard_on_close(LogPipe *s)
+{
+  _check_wildcard_files(s);
+}
+
+static gboolean
+_sd_open(LogPipe *s)
 {
   AFFileSourceDriver *self = (AFFileSourceDriver *) s;
   GlobalConfig *cfg = log_pipe_get_config(s);
   gint fd;
   gboolean file_opened, open_deferred = FALSE;
-
-  if (!log_src_driver_init_method(s))
-    return FALSE;
-
-  log_reader_options_init(&self->reader_options, cfg, self->super.super.group);
-
-  if (self->multi_line_mode != MLM_REGEXP && (self->multi_line_prefix || self->multi_line_garbage))
-    {
-      msg_error("multi-line-prefix() and/or multi-line-garbage() specified but multi-line-mode() is not 'regexp', please set multi-line-mode() properly",
-                NULL);
-      return FALSE;
-    }
 
   file_opened = affile_sd_open_file(self, self->filename->str, &fd);
   if (!file_opened && self->follow_freq > 0)
@@ -402,7 +517,151 @@ affile_sd_init(LogPipe *s)
       return self->super.super.optional;
     }
   return TRUE;
+}
 
+static gboolean
+affile_sd_monitor_callback(const gchar *filename, gpointer s, FileActionType action_type)
+{
+  AFFileWildcardSourceDriver *self = (AFFileWildcardSourceDriver*) s;
+
+  if (strcmp(self->super.filename->str, filename) != 0)
+    {
+      affile_sd_add_file_to_the_queue(self, filename);
+    }
+  if (self->super.reader == NULL)
+    {
+      gboolean end_of_list = TRUE;
+      gchar *filename = _monitor_pop_next_file(s, &end_of_list);
+
+      msg_trace("affile_sd_monitor_callback self->reader is NULL", evt_tag_str("file",filename), NULL);
+      if (filename)
+        {
+          g_string_assign(self->super.filename, filename);
+          g_free(filename);
+          return _sd_open(s);
+        }
+    }
+  return TRUE;
+}
+
+
+/* NOTE: runs in the main thread */
+static void
+affile_sd_notify(LogPipe *s, gint notify_code, gpointer user_data)
+{
+  AFFileSourceDriver *self = (AFFileSourceDriver *) s;
+  
+  switch (notify_code)
+    {
+    case NC_FILE_MOVED:
+      { 
+        g_assert(self->notification_handler.on_moved);
+        self->notification_handler.on_moved(s);
+        break;
+      }
+    case NC_FILE_SKIP:
+      {
+        if (self->notification_handler.on_skip)
+          self->notification_handler.on_skip(s);
+        break;
+      }
+    case NC_CLOSE:
+      {
+        if (self->notification_handler.on_close)
+          self->notification_handler.on_close(s);
+        break;
+      }
+    case NC_FILE_EOF:
+      {
+        if (self->notification_handler.on_eof)
+          self->notification_handler.on_eof(s);
+        break;
+      }
+    default:
+      g_assert_not_reached();
+      break;
+    }
+
+  log_reader_restart(self->reader);
+}
+
+static void
+affile_sd_queue(LogPipe *s, LogMessage *msg, const LogPathOptions *path_options, gpointer user_data)
+{
+  AFFileSourceDriver *self = (AFFileSourceDriver *) s;
+  static NVHandle filename_handle = 0;
+
+  if (!filename_handle)
+    filename_handle = log_msg_get_value_handle("FILE_NAME");
+  
+  log_msg_set_value(msg, filename_handle, self->filename->str, self->filename->len);
+
+  log_pipe_forward_msg(s, msg, path_options);
+}
+
+
+static gboolean
+affile_sd_init(LogPipe *s)
+{
+  AFFileSourceDriver *self = (AFFileSourceDriver *) s;
+  GlobalConfig *cfg = log_pipe_get_config(s);
+
+  if (!log_src_driver_init_method(s))
+    return FALSE;
+
+  log_reader_options_init(&self->reader_options, cfg, self->super.super.group);
+
+  if (self->multi_line_mode != MLM_REGEXP && (self->multi_line_prefix || self->multi_line_garbage))
+    {
+      msg_error("multi-line-prefix() and/or multi-line-garbage() specified but multi-line-mode() is not 'regexp', please set multi-line-mode() properly",
+                NULL);
+      return FALSE;
+    }
+
+  return _sd_open(s);
+}
+
+static gboolean
+affile_wildcard_sd_init(LogPipe *s)
+{
+  AFFileWildcardSourceDriver *self = (AFFileWildcardSourceDriver *) s;
+  GlobalConfig *cfg = log_pipe_get_config(s);
+
+  if (!log_src_driver_init_method(s))
+    return FALSE;
+
+  log_reader_options_init(&self->super.reader_options, cfg, self->super.super.super.group);
+
+  if (self->super.multi_line_mode != MLM_REGEXP && (self->super.multi_line_prefix || self->super.multi_line_garbage))
+    {
+      msg_error("multi-line-prefix() and/or multi-line-garbage() specified but multi-line-mode() is not 'regexp', please set multi-line-mode() properly",
+                NULL);
+      return FALSE;
+    }
+  
+  file_monitor_set_file_callback(self->file_monitor, affile_sd_monitor_callback, self);
+  
+  file_monitor_set_poll_freq(self->file_monitor, self->super.follow_freq);
+  
+  if ( !file_monitor_watch_directory(self->file_monitor, self->filename_pattern->str) )
+    {
+      msg_error("Error start filemonitor",
+                evt_tag_str("filemonitor", self->filename_pattern->str),
+                NULL);
+      return FALSE;
+    }
+  else if (self->super.reader == NULL)
+    {
+      gboolean end_of_list = TRUE;
+      gchar *filename = _monitor_pop_next_file(s, &end_of_list);
+      if (filename)
+        {
+          g_string_assign(self->super.filename, filename);
+          g_free(filename);
+          return _sd_open(s);
+        }
+    }
+  return TRUE;
 }
 
 static gboolean
@@ -410,12 +669,7 @@ affile_sd_deinit(LogPipe *s)
 {
   AFFileSourceDriver *self = (AFFileSourceDriver *) s;
 
-  if (self->reader)
-    {
-      log_pipe_deinit((LogPipe *) self->reader);
-      log_pipe_unref((LogPipe *) self->reader);
-      self->reader = NULL;
-    }
+  _reader_free(&self->reader);
 
   if (!log_src_driver_deinit_method(s))
     return FALSE;
@@ -439,8 +693,37 @@ affile_sd_free(LogPipe *s)
   log_src_driver_free(s);
 }
 
+static void
+affile_wildcard_sd_free(LogPipe *s)
+{
+  AFFileWildcardSourceDriver *self = (AFFileWildcardSourceDriver *) s;
+  gpointer it;
+  
+  while ((it = g_queue_pop_head(self->file_list)) != NULL)
+    {
+      if (it != END_OF_LIST)
+        g_free(it);
+    }
+  g_queue_free(self->file_list);
+  self->file_list = NULL;
+  
+  file_monitor_free(self->file_monitor);
+  self->file_monitor = NULL;
+  
+  g_string_free(self->super.filename, TRUE);
+  self->super.filename = NULL;
+  
+  g_string_free(self->filename_pattern, TRUE);
+  self->filename_pattern = NULL;
+  
+  g_assert(!self->super.reader);
+  
+  log_reader_options_destroy(&self->super.reader_options);
+  log_src_driver_free(s);
+}
+
 static AFFileSourceDriver *
-affile_sd_new_instance(gchar *filename)
+_new_instance(gchar *filename)
 {
   AFFileSourceDriver *self = g_new0(AFFileSourceDriver, 1);
   
@@ -457,21 +740,53 @@ affile_sd_new_instance(gchar *filename)
 
   if (affile_is_linux_proc_kmsg(filename))
     self->file_open_options.needs_privileges = TRUE;
+
+  self->notification_handler.on_moved = _on_moved;
+  self->notification_handler.on_skip = _on_skip;
+  self->notification_handler.on_close = NULL;
+  self->notification_handler.on_eof = NULL;
+
   return self;
 }
 
-LogDriver *
-affile_sd_new(gchar *filename)
+static AFFileWildcardSourceDriver *
+_wildcard_new_instance(gchar *filename)
 {
-  AFFileSourceDriver *self = affile_sd_new_instance(filename);
+  AFFileWildcardSourceDriver *self = g_new0(AFFileWildcardSourceDriver, 1);
+  
+  log_src_driver_init_instance(&self->super.super);
+  self->super.filename = g_string_new(filename);
+  self->super.super.super.super.init = affile_wildcard_sd_init;
+  self->super.super.super.super.queue = affile_sd_queue;
+  self->super.super.super.super.deinit = affile_sd_deinit;
+  self->super.super.super.super.notify = affile_sd_notify;
+  self->super.super.super.super.free_fn = affile_wildcard_sd_free;
+  log_reader_options_defaults(&self->super.reader_options);
+  file_perm_options_defaults(&self->super.file_perm_options);
+  self->super.reader_options.parse_options.flags |= LP_LOCAL;
 
+  self->super.notification_handler.on_moved = _on_moved;
+  self->super.notification_handler.on_skip = _wildcard_on_skip;
+  self->super.notification_handler.on_close = _wildcard_on_close;
+  self->super.notification_handler.on_eof = _wildcard_on_eof;
+
+  self->file_monitor = file_monitor_new();
+  self->file_list = g_queue_new();
+  self->filename_pattern = g_string_new(filename);
+
+  return self;
+}
+
+static void
+_init_instance(AFFileSourceDriver *self, gchar *filename)
+{
   self->file_open_options.is_pipe = FALSE;
   self->file_open_options.open_flags = DEFAULT_SD_OPEN_FLAGS;
 
   if (cfg_is_config_version_older(configuration, 0x0300))
     {
       static gboolean warned = FALSE;
-      
+
       if (!warned)
         {
           msg_warning("WARNING: file source: default value of follow_freq in file sources has changed in " VERSION_3_0 " to '1' for all files except /proc/kmsg",
@@ -488,14 +803,32 @@ affile_sd_new(gchar *filename)
       else
         self->follow_freq = 1000;
     }
+}
+
+LogDriver *
+affile_sd_new(gchar *filename)
+{
+  AFFileSourceDriver *self = _new_instance(filename);
+
+  _init_instance(self, filename);
 
   return &self->super.super;
 }
 
 LogDriver *
+affile_wildcard_sd_new(gchar *filename)
+{
+  AFFileWildcardSourceDriver *self = _wildcard_new_instance(filename);
+
+  _init_instance(&self->super, filename);
+
+  return &self->super.super.super;
+}
+
+LogDriver *
 afpipe_sd_new(gchar *filename)
 {
-  AFFileSourceDriver *self = affile_sd_new_instance(filename);
+  AFFileSourceDriver *self = _new_instance(filename);
 
   self->file_open_options.is_pipe = TRUE;
   self->file_open_options.open_flags = DEFAULT_SD_OPEN_FLAGS_PIPE;

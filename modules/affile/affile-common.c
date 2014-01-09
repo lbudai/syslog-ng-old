@@ -169,3 +169,9 @@ affile_open_file(gchar *name, FileOpenOptions *open_opts, FilePermOptions *perm_
 
   return (*fd != -1);
 }
+
+inline gboolean
+filename_is_wildcard(const gchar *filename)
+{
+  return ((strchr(filename, '*') != NULL) || (strchr(filename, '?') != NULL)) ? TRUE : FALSE;
+}

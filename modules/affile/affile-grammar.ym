@@ -86,7 +86,7 @@ source_affile
 source_affile_params
 	: string
 	  {
-            last_driver = *instance = affile_sd_new($1);
+            last_driver = *instance = (filename_is_wildcard($1) == TRUE) ? affile_wildcard_sd_new($1) : affile_sd_new($1);
 	    free($1);
 	    last_reader_options = &((AFFileSourceDriver *) last_driver)->reader_options;
 	    last_file_perm_options = &((AFFileSourceDriver *) last_driver)->file_perm_options;

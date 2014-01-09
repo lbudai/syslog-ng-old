@@ -36,4 +36,6 @@ typedef struct _FileOpenOptions
 
 gboolean affile_open_file(gchar *name, FileOpenOptions *open_opts, FilePermOptions *perm_opts, gint *fd);
 
+gboolean filename_is_wildcard(const gchar *filename);
+
 #endif

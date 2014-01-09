@@ -28,7 +28,7 @@
 #include "logreader.h"
 #include "logproto/logproto-regexp-multiline-server.h"
 #include "affile-common.h"
-
+#include "filemonitor.h"
 
 enum
 {
@@ -36,6 +36,16 @@ enum
   MLM_INDENTED,
   MLM_REGEXP,
 };
+
+typedef void(*AFFileNotificationHandlerFunc)(LogPipe *s);
+
+typedef struct _AFFileNotificationHandler
+{
+  AFFileNotificationHandlerFunc on_moved;
+  AFFileNotificationHandlerFunc on_skip;
+  AFFileNotificationHandlerFunc on_close;
+  AFFileNotificationHandlerFunc on_eof;
+} AFFileNotificationHandler;
 
 typedef struct _AFFileSourceDriver
 {
@@ -50,15 +60,26 @@ typedef struct _AFFileSourceDriver
   gint multi_line_mode;
   MultiLineRegexp *multi_line_prefix, *multi_line_garbage;
   /* state information to follow a set of files using a wildcard expression */
+  AFFileNotificationHandler notification_handler;
 } AFFileSourceDriver;
+
+typedef struct _AFFileWildcardSourceDriver
+{
+  AFFileSourceDriver super;
+  FileMonitor *file_monitor;
+  GQueue *file_list;
+  GString *filename_pattern;
+} AFFileWildcardSourceDriver;
 
 LogDriver *affile_sd_new(gchar *filename);
 LogDriver *afpipe_sd_new(gchar *filename);
+LogDriver* affile_wildcard_sd_new(gchar *fname_pattern);
 
 gboolean affile_sd_set_multi_line_prefix(LogDriver *s, const gchar *prefix_regexp, GError **error);
 gboolean affile_sd_set_multi_line_garbage(LogDriver *s, const gchar *garbage_regexp, GError **error);
 gboolean affile_sd_set_multi_line_mode(LogDriver *s, const gchar *mode);
 void affile_sd_set_follow_freq(LogDriver *s, gint follow_freq);
+void affile_wildcard_sd_set_recursion(LogDriver *s, gint recursion);
 
 void affile_sd_set_recursion(LogDriver *s, const gint recursion);
 void affile_sd_set_pri_level(LogDriver *s, const gint16 severity);

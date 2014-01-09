@@ -175,6 +175,7 @@ typedef struct _MonitorBase
 
 
 static gboolean file_monitor_chk_file(FileMonitor * monitor, MonitorBase *source, const gchar *filename);
+static gboolean file_monitor_list_directory(FileMonitor *self, MonitorBase *source, const gchar *basedir);
 
 #if ENABLE_MONITOR_INOTIFY
 typedef struct _MonitorInotify
