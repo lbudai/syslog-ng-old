@@ -105,6 +105,7 @@ poll_file_changes_check_file(gpointer s)
         {
           /* we are at EOF */
           log_pipe_notify(self->control, NC_FILE_EOF, self);
+          return;
         }
       else if (pos > st.st_size)
         {
